@@ -4,6 +4,12 @@
 
 Every daily post opens a shared underground garage floor pre-seeded to 50–70% obstacle density (`6–10` open standard stalls on a `6x6` mobile-safe grid). Instead of playing a solitary puzzle with a detached leaderboard, every driver parks their official daily vehicle directly onto the post's shared **Live Floor**—leaving concrete parked silhouettes, callsign plates, and preset window notes for everyone who arrives next.
 
+### Live Hackathon Links
+
+- **Live Playable Demo Post**: [Last Spot — Daily Valet Shift (`r/last_spot_valet_dev2`)](https://www.reddit.com/r/last_spot_valet_dev2/comments/1xzr9mp/last_spot_daily_valet_shift_20261118/)
+- **Playtest Subreddit (`< 200` members, `dr-admin-approve` installed)**: [r/last_spot_valet_dev2](https://www.reddit.com/r/last_spot_valet_dev2/)
+- **Devvit App Directory Listing (Unpublished Playtest Build)**: [developers.reddit.com/apps/last-spot-valet](https://developers.reddit.com/apps/last-spot-valet)
+
 ---
 
 ## Gameplay Loop: The 3-Step Valet Shift
