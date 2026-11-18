@@ -1,0 +1,46 @@
+{
+  "name": "last-spot-valet",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "devvit playtest",
+    "test": "vitest run",
+    "test:types": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@devvit/start": "0.15.3",
+    "@devvit/web": "0.15.3",
+    "@hono/node-server": "^2.1.6",
+    "devvit": "0.15.3",
+    "hono": "^4.13.17",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "seedrandom": "^3.0.5",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@devvit/test": "0.15.3",
+    "@tailwindcss/vite": "^4.3.5",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/seedrandom": "^3.0.8",
+    "@vitejs/plugin-react": "^6.3.0",
+    "fast-check": "^3.23.2",
+    "jsdom": "^31.0.0",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.7",
+    "vitest": "^5.1.0"
+  }
+}

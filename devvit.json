@@ -1,0 +1,78 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "last-spot-valet",
+  "post": {
+    "dir": "dist/client",
+    "entrypoints": {
+      "default": {
+        "inline": true,
+        "entry": "splash.html",
+        "height": "tall"
+      },
+      "game": {
+        "entry": "game.html"
+      }
+    }
+  },
+  "server": {
+    "dir": "dist/server",
+    "entry": "index.cjs"
+  },
+  "permissions": {
+    "redis": true,
+    "reddit": {
+      "enable": true
+    }
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "Create Last Spot Post",
+        "description": "Publish a new Last Spot shared parking lot post",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/post-create"
+      },
+      {
+        "label": "Last Spot Ops Health",
+        "description": "Verify Hono and Redis runtime health",
+        "location": ["subreddit", "post"],
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/ops-health"
+      },
+      {
+        "label": "Reset Shared Parking Lot",
+        "description": "Open confirmation form to reset lot state for a post",
+        "location": ["subreddit", "post"],
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/ops-reset-lot"
+      },
+      {
+        "label": "Probe Redis Transaction",
+        "description": "Run live Devvit Redis watch/multi/exec and conflict probe",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/probe-tx"
+      }
+    ]
+  },
+  "forms": {
+    "opsResetLotForm": "/internal/form/ops-reset-lot"
+  },
+  "triggers": {
+    "onAppInstall": "/internal/triggers/on-app-install",
+    "onPostDelete": "/internal/triggers/on-post-delete"
+  },
+  "scheduler": {
+    "tasks": {
+      "dailyPost": {
+        "endpoint": "/internal/scheduler/daily-post",
+        "cron": "0 0 * * *"
+      }
+    }
+  },
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build"
+  }
+}
