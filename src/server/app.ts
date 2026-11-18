@@ -1317,13 +1317,120 @@ export function createApp(deps: AppDependencies = {}): Hono {
     );
   });
 
+  const ensureDailyPostSeeded = async (): Promise<
+    | {
+        readonly ok: true;
+        readonly outcome: 'created' | 'skipped_already_created' | 'skipped_locked';
+        readonly puzzleDate: string;
+        readonly postId: string | null;
+        readonly summaryCommentId: `t1_${string}` | null;
+        readonly postDataBytes: number | null;
+      }
+    | {
+        readonly ok: false;
+        readonly puzzleDate: string;
+        readonly error: string;
+      }
+  > => {
+    const currentNow = nowMs();
+    const runAtIso = new Date(currentNow).toISOString();
+    const puzzleDate = runAtIso.slice(0, 10);
+    const subredditName = context.subredditName ?? 'lastspot';
+
+    const priorStatus = await redisClient.hGetAll(CRON_STATUS_KEY);
+    if (
+      priorStatus.lastCreatedPuzzleDate === puzzleDate &&
+      typeof priorStatus.lastPostId === 'string' &&
+      priorStatus.lastPostId.length > 0
+    ) {
+      await redisClient.hSet(CRON_STATUS_KEY, {
+        lastRunAtIso: runAtIso,
+        lastStatus: 'skipped_already_created',
+        lastPuzzleDate: puzzleDate,
+      });
+      return {
+        ok: true,
+        outcome: 'skipped_already_created',
+        puzzleDate,
+        postId: priorStatus.lastPostId,
+        summaryCommentId: null,
+        postDataBytes: null,
+      };
+    }
+
+    const cronLockKey = buildCronLockKey(puzzleDate);
+    const lockReply = await redisClient.set(cronLockKey, '1', {
+      nx: true,
+      expiration: new Date(Math.max(Date.now(), currentNow) + 120_000),
+    });
+
+    if (lockReply !== 'OK') {
+      await redisClient.hSet(CRON_STATUS_KEY, {
+        lastRunAtIso: runAtIso,
+        lastStatus: 'skipped_locked',
+        lastPuzzleDate: puzzleDate,
+      });
+      return {
+        ok: true,
+        outcome: 'skipped_locked',
+        puzzleDate,
+        postId: null,
+        summaryCommentId: null,
+        postDataBytes: null,
+      };
+    }
+
+    try {
+      const created = await createAndMaterializeSeededPost({
+        redisClient,
+        redditClient,
+        subredditName,
+        puzzleDate,
+        seed: `d:${puzzleDate}`,
+      });
+      await redisClient.hSet(CRON_STATUS_KEY, {
+        lastRunAtIso: runAtIso,
+        lastStatus: 'created',
+        lastPostId: created.postId,
+        lastPuzzleDate: puzzleDate,
+        lastCreatedPuzzleDate: puzzleDate,
+        lastError: '',
+      });
+      return {
+        ok: true,
+        outcome: 'created',
+        puzzleDate,
+        postId: created.postId,
+        summaryCommentId: created.summaryCommentId,
+        postDataBytes: created.postDataBytes,
+      };
+    } catch (error) {
+      await redisClient.del(cronLockKey);
+      const message = error instanceof Error ? error.message : String(error);
+      await redisClient.hSet(CRON_STATUS_KEY, {
+        lastRunAtIso: runAtIso,
+        lastStatus: 'failed',
+        lastPuzzleDate: puzzleDate,
+        lastError: message,
+      });
+      return {
+        ok: false,
+        puzzleDate,
+        error: message,
+      };
+    }
+  };
+
   router.post(TRIGGER_ENDPOINTS.onAppInstall, async (c) => {
     const payload = await readJsonRecord(c);
+    const seeded = await ensureDailyPostSeeded();
     console.info(
       JSON.stringify({
         event: 'lifecycle.on_app_install',
         subredditName: context.subredditName ?? null,
         triggerType: typeof payload.type === 'string' ? payload.type : 'AppInstall',
+        initialPostOutcome: seeded.ok ? seeded.outcome : 'failed',
+        initialPostId: seeded.ok ? seeded.postId : null,
       }),
     );
     return c.json<TriggerResponse>(
@@ -1374,29 +1481,17 @@ export function createApp(deps: AppDependencies = {}): Hono {
 
   router.post(SCHEDULER_TASKS.dailyPost.endpoint, async (c) => {
     await readJsonRecord(c);
-    const currentNow = nowMs();
-    const runAtIso = new Date(currentNow).toISOString();
-    const puzzleDate = runAtIso.slice(0, 10);
-    const subredditName = context.subredditName ?? 'lastspot';
-
-    const priorStatus = await redisClient.hGetAll(CRON_STATUS_KEY);
-    if (
-      priorStatus.lastCreatedPuzzleDate === puzzleDate &&
-      typeof priorStatus.lastPostId === 'string' &&
-      priorStatus.lastPostId.length > 0
-    ) {
-      await redisClient.hSet(CRON_STATUS_KEY, {
-        lastRunAtIso: runAtIso,
-        lastStatus: 'skipped_already_created',
-        lastPuzzleDate: puzzleDate,
-      });
+    const seeded = await ensureDailyPostSeeded();
+    if (seeded.ok) {
       console.info(
         JSON.stringify({
           event: 'scheduler.daily_post_tick',
           task: SCHEDULER_TASKS.dailyPost.name,
-          outcome: 'skipped_already_created',
-          puzzleDate,
-          postId: priorStatus.lastPostId,
+          outcome: seeded.outcome,
+          puzzleDate: seeded.puzzleDate,
+          postId: seeded.postId,
+          summaryCommentId: seeded.summaryCommentId,
+          postDataBytes: seeded.postDataBytes,
           subredditName: context.subredditName ?? null,
         }),
       );
@@ -1404,113 +1499,33 @@ export function createApp(deps: AppDependencies = {}): Hono {
         {
           status: 'ok',
           task: SCHEDULER_TASKS.dailyPost.name,
-          outcome: 'skipped_already_created',
-          postId: priorStatus.lastPostId,
-          puzzleDate,
+          outcome: seeded.outcome,
+          postId: seeded.postId,
+          summaryCommentId: seeded.summaryCommentId,
+          puzzleDate: seeded.puzzleDate,
         },
         200,
       );
     }
 
-    const cronLockKey = buildCronLockKey(puzzleDate);
-    const lockReply = await redisClient.set(cronLockKey, '1', {
-      nx: true,
-      expiration: new Date(Math.max(Date.now(), currentNow) + 120_000),
-    });
-
-    if (lockReply !== 'OK') {
-      await redisClient.hSet(CRON_STATUS_KEY, {
-        lastRunAtIso: runAtIso,
-        lastStatus: 'skipped_locked',
-        lastPuzzleDate: puzzleDate,
-      });
-      console.info(
-        JSON.stringify({
-          event: 'scheduler.daily_post_tick',
-          task: SCHEDULER_TASKS.dailyPost.name,
-          outcome: 'skipped_locked',
-          puzzleDate,
-          subredditName: context.subredditName ?? null,
-        }),
-      );
-      return c.json(
-        {
-          status: 'ok',
-          task: SCHEDULER_TASKS.dailyPost.name,
-          outcome: 'skipped_locked',
-          puzzleDate,
-        },
-        200,
-      );
-    }
-
-    try {
-      const created = await createAndMaterializeSeededPost({
-        redisClient,
-        redditClient,
-        subredditName,
-        puzzleDate,
-        seed: `d:${puzzleDate}`,
-      });
-      await redisClient.hSet(CRON_STATUS_KEY, {
-        lastRunAtIso: runAtIso,
-        lastStatus: 'created',
-        lastPostId: created.postId,
-        lastPuzzleDate: puzzleDate,
-        lastCreatedPuzzleDate: puzzleDate,
-        lastError: '',
-      });
-      console.info(
-        JSON.stringify({
-          event: 'scheduler.daily_post_tick',
-          task: SCHEDULER_TASKS.dailyPost.name,
-          outcome: 'created',
-          puzzleDate,
-          postId: created.postId,
-          summaryCommentId: created.summaryCommentId,
-          postDataBytes: created.postDataBytes,
-          subredditName: context.subredditName ?? null,
-        }),
-      );
-      return c.json(
-        {
-          status: 'ok',
-          task: SCHEDULER_TASKS.dailyPost.name,
-          outcome: 'created',
-          postId: created.postId,
-          summaryCommentId: created.summaryCommentId,
-          puzzleDate,
-        },
-        200,
-      );
-    } catch (error) {
-      await redisClient.del(cronLockKey);
-      const message = error instanceof Error ? error.message : String(error);
-      await redisClient.hSet(CRON_STATUS_KEY, {
-        lastRunAtIso: runAtIso,
-        lastStatus: 'failed',
-        lastPuzzleDate: puzzleDate,
-        lastError: message,
-      });
-      console.error(
-        JSON.stringify({
-          event: 'scheduler.daily_post_failed',
-          task: SCHEDULER_TASKS.dailyPost.name,
-          puzzleDate,
-          error: message,
-        }),
-      );
-      return c.json(
-        {
-          status: 'error',
-          task: SCHEDULER_TASKS.dailyPost.name,
-          outcome: 'failed',
-          puzzleDate,
-          error: message,
-        },
-        500,
-      );
-    }
+    console.error(
+      JSON.stringify({
+        event: 'scheduler.daily_post_failed',
+        task: SCHEDULER_TASKS.dailyPost.name,
+        puzzleDate: seeded.puzzleDate,
+        error: seeded.error,
+      }),
+    );
+    return c.json(
+      {
+        status: 'error',
+        task: SCHEDULER_TASKS.dailyPost.name,
+        outcome: 'failed',
+        puzzleDate: seeded.puzzleDate,
+        error: seeded.error,
+      },
+      500,
+    );
   });
 
   return router;
