@@ -12,15 +12,13 @@ export interface BoardLayout {
   readonly elevatorCell: number;
   readonly obstacles: FloorView['obstacles'];
   readonly vehicles?: FloorView['vehicles'];
-  readonly remainingStalls: number;
 }
 
 export interface VisitorHold {
   readonly postId: string;
   readonly floorNumber: number;
   readonly cells: readonly number[];
-  readonly warmUpScores: readonly [number, number];
-  readonly savedAt: number;
+  readonly warmUpScores?: readonly [number, number];
 }
 
 export function holdKey(postId: string): string {
@@ -35,8 +33,8 @@ export function readHold(postId: string): VisitorHold | null {
     if (value?.postId === postId && Number.isSafeInteger(value.floorNumber) &&
       value.floorNumber! > 0 && Array.isArray(value.cells) &&
       (value.cells.length === 2 || value.cells.length === 3) && value.cells.every(Number.isSafeInteger) &&
-      Array.isArray(value.warmUpScores) && value.warmUpScores.length === 2 &&
-      value.warmUpScores.every(Number.isFinite) && Number.isFinite(value.savedAt)) {
+      (value.warmUpScores === undefined || (Array.isArray(value.warmUpScores) && value.warmUpScores.length === 2 &&
+        value.warmUpScores.every(Number.isFinite)))) {
       return value as VisitorHold;
     }
   } catch {
@@ -83,7 +81,7 @@ export function park(payload: ParkRequestPayload): Promise<ParkResponse> {
 }
 
 export type ShareCommentResponse =
-  | { readonly ok: true; readonly posted: boolean; readonly alreadyShared: boolean; readonly formattedReport: string; readonly fellBackToClipboard: boolean }
+  | { readonly ok: true; readonly posted: boolean; readonly alreadyShared: boolean; readonly formattedReport: string }
   | { readonly ok: false; readonly code: string };
 
 export function postBattleReport(windowNoteId: WindowNoteId | null): Promise<ShareCommentResponse> {

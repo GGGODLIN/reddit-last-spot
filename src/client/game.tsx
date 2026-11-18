@@ -48,7 +48,7 @@ async function openSession(signal: AbortSignal): Promise<SessionState> {
   }
   const held = readHold(lot.postId);
   if (held === null) return initial;
-  const shift: Shift = { ...EMPTY_SHIFT, step: 2, scores: held.warmUpScores };
+  const shift: Shift = { ...EMPTY_SHIFT, step: 2, scores: held.warmUpScores ?? [0, 0] };
   const preview = held.floorNumber === lot.activeFloor && lot.liveFloor.status === 'LIVE'
     ? checkPlacement(lot.liveFloor, lot.assignedVehicle, held.cells) : null;
   if (!preview) {
@@ -191,7 +191,7 @@ function ShiftGame({ initial }: { readonly initial: SessionState }): React.JSX.E
     if (result?.mode !== 'VISITOR_HOLD') return;
     const hold: VisitorHold = {
       postId: lot.postId, floorNumber: result.floorNumber, cells: result.metrics.cells,
-      warmUpScores: shift.scores, savedAt: Date.now(),
+      warmUpScores: shift.scores,
     };
     try {
       localStorage.setItem(holdKey(lot.postId), JSON.stringify(hold));
