@@ -11,6 +11,8 @@ import {
   type LotSummaryResponse,
   MAX_FLOORS,
   type ParkedVehicle,
+  type ParkRequestPayload,
+  type ParkResponse,
   type PlacementReceipt,
   type StoredFloorRecord,
   validatePlacementShape,
@@ -205,20 +207,25 @@ export function createApp(deps: AppDependencies = {}): Hono {
   router.post(API_ENDPOINTS.park, async (c) => {
     const userId = context.userId;
     if (!isAuthenticatedUserId(userId)) {
-      return c.json({ ok: false, code: ERROR_CODES.loginRequiredForOfficialSpot }, 401);
+      return c.json<ParkResponse>({ ok: false, code: ERROR_CODES.loginRequiredForOfficialSpot }, 401);
     }
 
     const rawJsonResult = await readStrictJsonBody(c);
     if (!rawJsonResult.ok) {
-      return c.json({ ok: false, code: ERROR_CODES.invalidParkPayload }, 400);
+      return c.json<ParkResponse>({ ok: false, code: ERROR_CODES.invalidParkPayload }, 400);
     }
 
     const parsedBodyResult = parkRequestSchema.safeParse(rawJsonResult.body);
     if (!parsedBodyResult.success) {
-      return c.json({ ok: false, code: ERROR_CODES.invalidParkPayload }, 400);
+      return c.json<ParkResponse>({ ok: false, code: ERROR_CODES.invalidParkPayload }, 400);
     }
 
-    const body = parsedBodyResult.data;
+    const body: ParkRequestPayload = {
+      ...parsedBodyResult.data,
+      windowNoteId: isPresetWindowNoteId(parsedBodyResult.data.windowNoteId)
+        ? parsedBodyResult.data.windowNoteId
+        : null,
+    };
     const postId = resolveActivePostId();
     const defaults = extractPostSeedDefaults(postId, context.postData, nowMs());
     await ensurePostLotInitialized(redisClient, postId, defaults);
@@ -249,7 +256,7 @@ export function createApp(deps: AppDependencies = {}): Hono {
     const preExistingReceipt = parsePlacementReceipt(prePlacementRaw);
     if (preExistingReceipt !== null) {
       const latest = await readLotStateSnapshot(redisClient, postId, userId, undefined, defaults);
-      return c.json(
+      return c.json<ParkResponse>(
         {
           ok: true,
           alreadyCommitted: true,
@@ -261,7 +268,7 @@ export function createApp(deps: AppDependencies = {}): Hono {
     }
 
     const normalizedCells = shapeValidation.normalizedCells;
-    const safeWindowNoteId = isPresetWindowNoteId(body.windowNoteId) ? body.windowNoteId : null;
+    const safeWindowNoteId = body.windowNoteId ?? null;
     let existingReceiptFromWatch: PlacementReceipt | null = null;
 
     for (let attempt = 0; attempt <= MAX_BENIGN_PARK_RETRIES; attempt += 1) {
@@ -464,7 +471,7 @@ export function createApp(deps: AppDependencies = {}): Hono {
             openedOverflowFloor: txResult.value.receipt.openedOverflowFloor,
           }),
         );
-        return c.json(
+        return c.json<ParkResponse>(
           {
             ok: true,
             alreadyCommitted: false,
@@ -478,7 +485,7 @@ export function createApp(deps: AppDependencies = {}): Hono {
       if (txResult.status === 'aborted') {
         if (txResult.reason === 'already_committed' && existingReceiptFromWatch !== null) {
           const latest = await readLotStateSnapshot(redisClient, postId, userId, undefined, defaults);
-          return c.json(
+          return c.json<ParkResponse>(
             {
               ok: true,
               alreadyCommitted: true,
@@ -489,14 +496,14 @@ export function createApp(deps: AppDependencies = {}): Hono {
           );
         }
         if (txResult.reason === 'floor_not_open') {
-          return c.json({ ok: false, code: ERROR_CODES.invalidParkPayload }, 400);
+          return c.json<ParkResponse>({ ok: false, code: ERROR_CODES.invalidParkPayload }, 400);
         }
         const latest = await readLotStateSnapshot(redisClient, postId, userId, undefined, defaults);
         const conflictCode =
           txResult.reason === 'spot_taken'
             ? ERROR_CODES.spotTaken
             : ERROR_CODES.lotUpdatedRetryPreview;
-        return c.json(
+        return c.json<ParkResponse>(
           { ok: false, code: conflictCode, latestLotState: latest.ok ? latest.state : null },
           409,
         );
@@ -508,7 +515,7 @@ export function createApp(deps: AppDependencies = {}): Hono {
     }
 
     const latest = await readLotStateSnapshot(redisClient, postId, userId, undefined, defaults);
-    return c.json(
+    return c.json<ParkResponse>(
       {
         ok: false,
         code: ERROR_CODES.concurrentConflictRetryExhausted,

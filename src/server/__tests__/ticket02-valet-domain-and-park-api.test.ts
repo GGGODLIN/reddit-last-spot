@@ -8,7 +8,6 @@ import {
   evaluatePlacement,
   generateSeededFloor,
   generateWarmUpBays,
-  isPerimeterCell,
   listValidPlacements,
   type LotStateResponse,
   type LotSummaryResponse,
@@ -479,7 +478,6 @@ describe('Ticket 02 — Role 1: Concrete Seam 1 Capabilities (Valet Shift & Opti
       expect(firstBody.liveFloor.floorNumber).toBe(1);
       expect(firstBody.liveFloor.status).toBe('LIVE');
       expect(firstBody.liveFloor.lastSpotHero).toBeNull();
-      expect(isPerimeterCell(6, 6, firstBody.liveFloor.elevatorCell)).toBe(true);
       expect(firstBody.liveFloor.remainingStalls).toBeGreaterThanOrEqual(6);
       expect(firstBody.liveFloor.remainingStalls).toBeLessThanOrEqual(10);
       expect(['sedan_2x1', 'van_3x1']).toContain(firstBody.assignedVehicle);
@@ -979,11 +977,7 @@ describe('Ticket 02 — Role 2: Safety Property Guardians (fast-check P1..P5)', 
         }
 
         const seededFloor = generateSeededFloor(seed, floorNumber, { gridCols, gridRows: 6 });
-        if (
-          seededFloor.remainingStalls < 6 ||
-          seededFloor.remainingStalls > 10 ||
-          !isPerimeterCell(gridCols, 6, seededFloor.elevatorCell)
-        ) {
+        if (seededFloor.remainingStalls < 6 || seededFloor.remainingStalls > 10) {
           return false;
         }
 

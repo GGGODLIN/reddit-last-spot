@@ -3,17 +3,14 @@ export const DEFAULT_GRID_COLS = 6 as const;
 export const DEFAULT_GRID_ROWS = 6 as const;
 export const MAX_FLOORS = 50 as const;
 
-export const VEHICLE_TYPES = ['sedan_2x1', 'van_3x1'] as const;
-export type VehicleType = (typeof VEHICLE_TYPES)[number];
+export type VehicleType = 'sedan_2x1' | 'van_3x1';
 
 export const OBSTACLE_KINDS = ['pillar', 'hydrant', 'corral', 'tarped_car'] as const;
 export type ObstacleKind = (typeof OBSTACLE_KINDS)[number];
 
-export const FLOOR_STATUSES = ['LIVE', 'ARCHIVED'] as const;
-export type FloorStatus = (typeof FLOOR_STATUSES)[number];
+export type FloorStatus = 'LIVE' | 'ARCHIVED';
 
-export const VIEWER_MODES = ['OFFICIAL_LIVE', 'VISITOR_HOLD'] as const;
-export type ViewerMode = (typeof VIEWER_MODES)[number];
+export type ViewerMode = 'OFFICIAL_LIVE' | 'VISITOR_HOLD';
 
 export const WINDOW_NOTE_IDS = [
   'tight_fit',

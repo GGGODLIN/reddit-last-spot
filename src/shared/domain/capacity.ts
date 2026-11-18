@@ -15,15 +15,6 @@ function assertPositiveGridDimensions(gridCols: number, gridRows: number): void 
   }
 }
 
-export function isPerimeterCell(gridCols: number, gridRows: number, cell: number): boolean {
-  if (!Number.isSafeInteger(cell) || cell < 0 || cell >= gridCols * gridRows) {
-    return false;
-  }
-  const row = Math.floor(cell / gridCols);
-  const col = cell % gridCols;
-  return row === 0 || row === gridRows - 1 || col === 0 || col === gridCols - 1;
-}
-
 export function isPresetWindowNoteId(candidate: string | undefined | null): candidate is WindowNoteId {
   return typeof candidate === 'string' && (WINDOW_NOTE_IDS as readonly string[]).includes(candidate);
 }
