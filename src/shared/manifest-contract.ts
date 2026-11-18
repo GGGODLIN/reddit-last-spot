@@ -52,6 +52,8 @@ export const API_ENDPOINTS = {
   lotSummary: '/api/lot-summary',
   lotState: '/api/lot-state',
   park: '/api/park',
+  shareComment: '/api/share-comment',
+  journeyTelemetry: '/api/telemetry/journey',
 } as const;
 
 export const ERROR_CODES = {
@@ -61,6 +63,8 @@ export const ERROR_CODES = {
   spotTaken: 'SPOT_TAKEN',
   lotUpdatedRetryPreview: 'LOT_UPDATED_RETRY_PREVIEW',
   concurrentConflictRetryExhausted: 'CONCURRENT_CONFLICT_RETRY_EXHAUSTED',
+  invalidWindowNote: 'INVALID_WINDOW_NOTE',
+  placementNotFound: 'PLACEMENT_NOT_FOUND',
 } as const;
 
 export const ALL_INTERNAL_ENDPOINTS = [

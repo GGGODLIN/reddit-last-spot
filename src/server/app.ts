@@ -1,13 +1,17 @@
 import type { RedisClient } from '@devvit/redis';
-import { context, reddit, redis } from '@devvit/web/server';
+import { context, EntrypointHeight, reddit, redis } from '@devvit/web/server';
 import type { TriggerResponse, UiResponse } from '@devvit/web/shared';
 import { Hono, type Context as HonoContext } from 'hono';
 import { z } from 'zod';
 import {
   computeNextUserStreak,
+  computeStandardStallCapacity,
+  DEFAULT_GRID_COLS,
+  DEFAULT_GRID_ROWS,
   evaluatePlacement,
   generateSeededFloor,
   isPresetWindowNoteId,
+  LOT_SCHEMA_VERSION,
   type LotSummaryResponse,
   MAX_FLOORS,
   type ParkedVehicle,
@@ -16,6 +20,7 @@ import {
   type PlacementReceipt,
   type StoredFloorRecord,
   validatePlacementShape,
+  type WindowNoteId,
 } from '../shared/domain';
 import {
   API_ENDPOINTS,
@@ -29,11 +34,14 @@ import {
   TRIGGER_ENDPOINTS,
 } from '../shared/manifest-contract';
 import {
+  buildCronLockKey,
   buildFloorView,
   buildPostScopedLotKeys,
   buildUserStatsKey,
+  CRON_STATUS_KEY,
   ensurePostLotInitialized,
   extractPostSeedDefaults,
+  formatSpoilerSafeBattleReport,
   parsePlacementReceipt,
   parseStoredFloorRecord,
   parseStoredLotMeta,
@@ -48,8 +56,30 @@ export { buildPostScopedLotKeys };
 const DEFAULT_SUMMARY_CACHE_TTL_MS = 5_000;
 const MAX_BENIGN_PARK_RETRIES = 3;
 
+export interface RedditApiAdapter {
+  submitCustomPost(
+    options: Parameters<typeof reddit.submitCustomPost>[0],
+  ): Promise<{ readonly id: string }>;
+  submitComment(options: {
+    readonly id: `t1_${string}` | `t3_${string}`;
+    readonly text: string;
+    readonly runAs?: 'USER' | 'APP';
+  }): Promise<{
+    readonly id: `t1_${string}`;
+    distinguish(makeSticky?: boolean): Promise<void>;
+  }>;
+}
+
 export interface AppDependencies {
   readonly redisClient?: RedisClient;
+  readonly redditClient?: RedditApiAdapter;
+  readonly journeyTelemetrySink?: (event: {
+    readonly step: string;
+    readonly subroute: string | null;
+    readonly postId: string | null;
+    readonly mode: string | null;
+    readonly receiptStatus?: string;
+  }) => Promise<{ readonly receiptStatus?: string } | void>;
   readonly nowMs?: () => number;
   readonly summaryCacheTtlMs?: number;
   readonly retryDelayMs?: () => number;
@@ -123,6 +153,129 @@ async function readStrictJsonBody(
   }
 }
 
+function buildDailyLotLogCommentBody(puzzleDate: string, remainingStalls: number): string {
+  return [
+    `**Daily Lot Log — Last Spot (${puzzleDate})**`,
+    '',
+    `Official community shift reports land below. Floor B1 opens with ${remainingStalls} standard 2x1 stalls available — exact grid coordinates are omitted from shift reports.`,
+  ].join('\n');
+}
+
+async function createAndMaterializeSeededPost(params: {
+  readonly redisClient: RedisClient;
+  readonly redditClient: RedditApiAdapter;
+  readonly subredditName: string;
+  readonly puzzleDate: string;
+  readonly seed: string;
+}): Promise<{
+  readonly postId: string;
+  readonly summaryCommentId: `t1_${string}` | null;
+  readonly postDataBytes: number;
+  readonly remainingStalls: number;
+}> {
+  const { redisClient, redditClient, subredditName, puzzleDate, seed } = params;
+  const seeded1 = generateSeededFloor(seed, 1, {
+    gridCols: DEFAULT_GRID_COLS,
+    gridRows: DEFAULT_GRID_ROWS,
+  });
+
+  const postData = {
+    schemaVersion: LOT_SCHEMA_VERSION,
+    puzzleDate,
+    seed,
+    gridCols: DEFAULT_GRID_COLS,
+    gridRows: DEFAULT_GRID_ROWS,
+    activeFloor: 1,
+    remainingStalls: seeded1.remainingStalls,
+    initialObstacleMask: seeded1.obstacles.map((o) => o.cell),
+  };
+  const postDataBytes = Buffer.byteLength(JSON.stringify(postData), 'utf8');
+  if (postDataBytes >= 256) {
+    throw new RangeError(`Custom postData exceeded 256-byte limit (${postDataBytes} bytes)`);
+  }
+
+  const post = await redditClient.submitCustomPost({
+    subredditName,
+    title: `Last Spot — Daily Valet Shift (${puzzleDate})`,
+    entry: 'default',
+    styles: {
+      height: EntrypointHeight.TALL,
+      backgroundColor: '#F8FAFCFF',
+      backgroundColorDark: '#090D16FF',
+    },
+    postData,
+    textFallback: {
+      text: 'Last Spot — Daily Shared Community Valet Shift. Open on modern web or mobile app to play.',
+    },
+  });
+
+  const [metaKey, floorsKey] = buildPostScopedLotKeys(post.id);
+  const floor1Record: StoredFloorRecord = {
+    floorNumber: 1,
+    seed: seeded1.seed,
+    elevatorCell: seeded1.elevatorCell,
+    obstacles: seeded1.obstacles,
+    vehicles: [],
+    remainingStalls: seeded1.remainingStalls,
+    status: 'LIVE',
+    lastSpotHero: null,
+  };
+
+  await Promise.all([
+    redisClient.hSet(floorsKey, { '1': JSON.stringify(floor1Record) }),
+    redisClient.hSet(metaKey, {
+      schemaVersion: String(LOT_SCHEMA_VERSION),
+      puzzleDate,
+      seed,
+      gridCols: String(DEFAULT_GRID_COLS),
+      gridRows: String(DEFAULT_GRID_ROWS),
+      activeFloor: '1',
+      floorCount: '1',
+      revision: '0',
+    }),
+  ]);
+
+  let summaryCommentId: `t1_${string}` | null = null;
+  try {
+    const comment = await redditClient.submitComment({
+      id: post.id as `t3_${string}`,
+      text: buildDailyLotLogCommentBody(puzzleDate, seeded1.remainingStalls),
+      runAs: 'APP',
+    });
+    summaryCommentId = comment.id;
+    try {
+      await comment.distinguish(true);
+    } catch (distinguishError) {
+      // Non-mod permission edge cases during playtest must never abort post creation.
+      console.warn(
+        JSON.stringify({
+          event: 'ops.summary_comment_sticky_skipped',
+          postId: post.id,
+          commentId: comment.id,
+          error:
+            distinguishError instanceof Error ? distinguishError.message : String(distinguishError),
+        }),
+      );
+    }
+    await redisClient.hSet(metaKey, { summaryCommentId: comment.id });
+  } catch (commentError) {
+    console.warn(
+      JSON.stringify({
+        event: 'ops.summary_comment_create_failed',
+        postId: post.id,
+        error: commentError instanceof Error ? commentError.message : String(commentError),
+      }),
+    );
+  }
+
+  return {
+    postId: post.id,
+    summaryCommentId,
+    postDataBytes,
+    remainingStalls: seeded1.remainingStalls,
+  };
+}
+
 function sleepMs(durationMs: number): Promise<void> {
   if (durationMs <= 0) return Promise.resolve();
   return new Promise((resolve) => {
@@ -138,6 +291,7 @@ type ParkTxAbortReason =
 
 export function createApp(deps: AppDependencies = {}): Hono {
   const redisClient = deps.redisClient ?? redis;
+  const redditClient: RedditApiAdapter = deps.redditClient ?? reddit;
   const nowMs = deps.nowMs ?? (() => Date.now());
   const summaryCacheTtlMs = deps.summaryCacheTtlMs ?? DEFAULT_SUMMARY_CACHE_TTL_MS;
   const retryDelayMs = deps.retryDelayMs ?? (() => 40 + Math.floor(Math.random() * 81));
@@ -582,22 +736,316 @@ export function createApp(deps: AppDependencies = {}): Hono {
     );
   });
 
-  router.post(MENU_ENDPOINTS.postCreate, async (c) => {
+  router.post(API_ENDPOINTS.shareComment, async (c) => {
+    const userId = context.userId;
+    if (!isAuthenticatedUserId(userId)) {
+      return c.json({ ok: false, code: ERROR_CODES.loginRequiredForOfficialSpot }, 401);
+    }
+
+    const parsedBody = await readStrictJsonBody(c);
+    if (!parsedBody.ok) {
+      return c.json({ ok: false, code: ERROR_CODES.invalidWindowNote }, 400);
+    }
+
+    const rawWindowNoteId = (parsedBody.body as Record<string, unknown>).windowNoteId;
+    if (
+      rawWindowNoteId !== undefined &&
+      rawWindowNoteId !== null &&
+      (typeof rawWindowNoteId !== 'string' || !isPresetWindowNoteId(rawWindowNoteId))
+    ) {
+      return c.json({ ok: false, code: ERROR_CODES.invalidWindowNote }, 400);
+    }
+
+    const postId = resolveActivePostId();
+    const [metaKey, , placementsKey] = buildPostScopedLotKeys(postId);
+    const [rawMeta, rawPlacement] = await Promise.all([
+      redisClient.hGetAll(metaKey),
+      redisClient.hGet(placementsKey, userId),
+    ]);
+
+    const receipt = parsePlacementReceipt(rawPlacement);
+    if (receipt === null) {
+      return c.json({ ok: false, code: ERROR_CODES.placementNotFound }, 404);
+    }
+
+    const effectiveNoteId: WindowNoteId | null =
+      rawWindowNoteId === undefined
+        ? receipt.windowNoteId
+        : isPresetWindowNoteId(rawWindowNoteId)
+          ? rawWindowNoteId
+          : null;
+
+    const formattedReport = formatSpoilerSafeBattleReport(receipt, effectiveNoteId);
+    const targetId: `t1_${string}` | `t3_${string}` =
+      typeof rawMeta.summaryCommentId === 'string' &&
+      rawMeta.summaryCommentId.startsWith('t1_') &&
+      rawMeta.summaryCommentId.length > 3
+        ? (rawMeta.summaryCommentId as `t1_${string}`)
+        : (postId as `t3_${string}`);
+
+    const shareField = `share:${userId}`;
+    const inserted = await redisClient.hSetNX(metaKey, shareField, 'pending');
+    if (inserted !== 1) {
+      const existingVal = await redisClient.hGet(metaKey, shareField);
+      if (typeof existingVal === 'string' && existingVal.startsWith('t1_')) {
+        console.info(
+          JSON.stringify({
+            event: 'lot.battle_report_duplicate',
+            postId,
+            userId,
+            commentId: existingVal,
+            parentCommentId: targetId,
+            fellBackToAppAccount: true,
+          }),
+        );
+        return c.json(
+          {
+            ok: true,
+            posted: true,
+            alreadyShared: true,
+            commentId: existingVal,
+            parentCommentId: targetId,
+            fellBackToClipboard: false,
+            fellBackToAppAccount: true,
+            formattedReport,
+          },
+          200,
+        );
+      }
+
+      return c.json(
+        {
+          ok: true,
+          posted: false,
+          alreadyShared: true,
+          commentId: null,
+          parentCommentId: targetId,
+          fellBackToClipboard: true,
+          fellBackToAppAccount: true,
+          formattedReport,
+        },
+        200,
+      );
+    }
+
     try {
-      const post = await reddit.submitCustomPost({
-        title: 'Last Spot — Community Valet Shift',
+      const comment = await redditClient.submitComment({
+        id: targetId,
+        text: formattedReport,
+        runAs: 'APP',
       });
-      const subredditName = context.subredditName ?? 'reddit';
+      await redisClient.hSet(metaKey, { [shareField]: comment.id });
+      console.info(
+        JSON.stringify({
+          event: 'lot.battle_report_shared',
+          postId,
+          userId,
+          commentId: comment.id,
+          parentCommentId: targetId,
+          fellBackToAppAccount: true,
+        }),
+      );
+      return c.json(
+        {
+          ok: true,
+          posted: true,
+          alreadyShared: false,
+          commentId: comment.id,
+          parentCommentId: targetId,
+          fellBackToClipboard: false,
+          fellBackToAppAccount: true,
+          formattedReport,
+        },
+        200,
+      );
+    } catch (error) {
+      await redisClient.hDel(metaKey, [shareField]);
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        JSON.stringify({
+          event: 'lot.battle_report_share_fallback',
+          postId,
+          userId,
+          parentCommentId: targetId,
+          fellBackToClipboard: true,
+          fellBackToAppAccount: true,
+          error: message,
+        }),
+      );
+      return c.json(
+        {
+          ok: true,
+          posted: false,
+          alreadyShared: false,
+          commentId: null,
+          parentCommentId: targetId,
+          fellBackToClipboard: true,
+          fellBackToAppAccount: true,
+          formattedReport,
+        },
+        200,
+      );
+    }
+  });
+
+  const handleJourneyTelemetry = async (c: HonoContext) => {
+    const parsedResult = await readStrictJsonBody(c);
+    if (!parsedResult.ok) {
+      console.warn(
+        JSON.stringify({
+          event: 'telemetry.journey_malformed_receipt',
+          reason: 'malformed_json_or_non_object',
+          path: c.req.path,
+          postId: context.postId ?? null,
+        }),
+      );
+      return c.json({ ok: true, accepted: false, receiptStatus: 'IGNORED_INVALID' }, 200);
+    }
+
+    const record = parsedResult.body as Record<string, unknown>;
+    const rawStep = record.step;
+    if (typeof rawStep !== 'string' || rawStep.trim().length === 0) {
+      console.warn(
+        JSON.stringify({
+          event: 'telemetry.journey_malformed_receipt',
+          reason: 'missing_or_empty_step',
+          path: c.req.path,
+          postId: context.postId ?? null,
+        }),
+      );
+      return c.json({ ok: true, accepted: false, receiptStatus: 'IGNORED_INVALID' }, 200);
+    }
+
+    if (
+      record.receiptStatus !== undefined &&
+      (typeof record.receiptStatus !== 'string' || record.receiptStatus.trim().length === 0)
+    ) {
+      console.warn(
+        JSON.stringify({
+          event: 'telemetry.journey_malformed_receipt',
+          reason: 'invalid_receipt_status',
+          path: c.req.path,
+          step: rawStep.trim(),
+        }),
+      );
+      return c.json({ ok: true, accepted: false, receiptStatus: 'IGNORED_INVALID' }, 200);
+    }
+
+    const step = rawStep.trim();
+    const subroute =
+      c.req.path.length > API_ENDPOINTS.journeyTelemetry.length
+        ? c.req.path.slice(API_ENDPOINTS.journeyTelemetry.length + 1)
+        : null;
+    const effectivePostId =
+      typeof record.postId === 'string' && record.postId.length > 0
+        ? record.postId
+        : (context.postId ?? null);
+    const effectiveMode =
+      typeof record.mode === 'string' && record.mode.length > 0 ? record.mode : null;
+    const clientReportedStatus =
+      typeof record.receiptStatus === 'string' ? record.receiptStatus.trim() : undefined;
+
+    let resolvedStatus = clientReportedStatus ?? 'RECORDED';
+    if (deps.journeyTelemetrySink !== undefined) {
+      try {
+        const sinkReply = await deps.journeyTelemetrySink({
+          step,
+          subroute,
+          postId: effectivePostId,
+          mode: effectiveMode,
+          receiptStatus: clientReportedStatus,
+        });
+        if (typeof sinkReply?.receiptStatus === 'string' && sinkReply.receiptStatus.length > 0) {
+          resolvedStatus = sinkReply.receiptStatus;
+        }
+      } catch (sinkError) {
+        console.warn(
+          JSON.stringify({
+            event: 'telemetry.journey_sink_error',
+            step,
+            postId: effectivePostId,
+            error: sinkError instanceof Error ? sinkError.message : String(sinkError),
+          }),
+        );
+        return c.json({ ok: true, accepted: false, receiptStatus: 'SINK_ERROR' }, 200);
+      }
+    }
+
+    if (resolvedStatus === 'INVALID' || resolvedStatus === 'JOURNEY_RECEIPT_INVALID') {
+      console.warn(
+        JSON.stringify({
+          event: 'telemetry.journey_malformed_receipt',
+          reason: 'upstream_invalid_receipt',
+          step,
+          postId: effectivePostId,
+          receiptStatus: resolvedStatus,
+        }),
+      );
+      return c.json({ ok: true, accepted: false, receiptStatus: 'IGNORED_INVALID' }, 200);
+    }
+
+    if (
+      resolvedStatus === 'DENIED_PLAYTEST' ||
+      resolvedStatus === 'DENIED_NOT_ALLOWLISTED' ||
+      resolvedStatus === 'JOURNEY_RECEIPT_DENIED_PLAYTEST' ||
+      resolvedStatus === 'JOURNEY_RECEIPT_DENIED_NOT_ALLOWLISTED'
+    ) {
+      console.info(
+        JSON.stringify({
+          event: 'telemetry.journey_denied_nonblocking',
+          step,
+          subroute,
+          postId: effectivePostId,
+          mode: effectiveMode,
+          receiptStatus: resolvedStatus,
+        }),
+      );
+      return c.json({ ok: true, accepted: false, receiptStatus: resolvedStatus }, 200);
+    }
+
+    console.info(
+      JSON.stringify({
+        event: 'telemetry.journey_forwarded',
+        step,
+        subroute,
+        postId: effectivePostId,
+        mode: effectiveMode,
+        userId: context.userId ?? null,
+        receiptStatus: resolvedStatus,
+      }),
+    );
+    return c.json({ ok: true, accepted: true, receiptStatus: resolvedStatus, step }, 200);
+  };
+
+  router.post(API_ENDPOINTS.journeyTelemetry, handleJourneyTelemetry);
+  router.post(`${API_ENDPOINTS.journeyTelemetry}/*`, handleJourneyTelemetry);
+
+  router.post(MENU_ENDPOINTS.postCreate, async (c) => {
+    const currentNow = nowMs();
+    const puzzleDate = new Date(currentNow).toISOString().slice(0, 10);
+    const subredditName = context.subredditName ?? 'lastspot';
+    const seed = `m:${puzzleDate}:${(currentNow % 1_000_000_000).toString(36)}`;
+
+    try {
+      const created = await createAndMaterializeSeededPost({
+        redisClient,
+        redditClient,
+        subredditName,
+        puzzleDate,
+        seed,
+      });
       console.info(
         JSON.stringify({
           event: 'ops.menu_post_create',
-          postId: post.id,
+          postId: created.postId,
+          summaryCommentId: created.summaryCommentId,
+          postDataBytes: created.postDataBytes,
           subredditName,
         }),
       );
       return c.json<UiResponse>(
         {
-          navigateTo: `https://reddit.com/r/${subredditName}/comments/${post.id}`,
+          navigateTo: `https://reddit.com/r/${subredditName}/comments/${created.postId}`,
         },
         200,
       );
@@ -619,21 +1067,92 @@ export function createApp(deps: AppDependencies = {}): Hono {
   });
 
   router.post(MENU_ENDPOINTS.opsHealth, async (c) => {
-    const pingCount = await redisClient.exists('ops:health:ping');
     const subredditLabel = context.subredditName ?? 'unknown';
+    const postDataBytes = Buffer.byteLength(JSON.stringify(context.postData ?? {}), 'utf8');
+    const postDataUnder2048 = postDataBytes < 2048;
+    const cronStatus = await redisClient.hGetAll(CRON_STATUS_KEY);
+    const postId =
+      typeof context.postId === 'string' && context.postId.length > 0 ? context.postId : null;
+
+    if (postId === null) {
+      const emptyProbe = computeStandardStallCapacity(DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, []);
+      const matchInvariantOk = emptyProbe.remainingStalls === 18;
+      console.info(
+        JSON.stringify({
+          event: 'ops.health_receipt',
+          ok: matchInvariantOk && postDataUnder2048,
+          matchInvariantOk,
+          postDataBytes,
+          postDataUnder2048,
+          cronStatus,
+          postId: null,
+          activeFloor: null,
+          revision: null,
+          remainingStalls: emptyProbe.remainingStalls,
+        }),
+      );
+      return c.json<UiResponse>(
+        {
+          showToast: `Last Spot healthy in r/${subredditLabel}`,
+        },
+        200,
+      );
+    }
+
+    const defaults = extractPostSeedDefaults(postId, context.postData, nowMs());
+    await ensurePostLotInitialized(redisClient, postId, defaults);
+    const [metaKey, floorsKey] = buildPostScopedLotKeys(postId);
+    const [rawMeta, rawFloors] = await Promise.all([
+      redisClient.hGetAll(metaKey),
+      redisClient.hGetAll(floorsKey),
+    ]);
+    const meta = parseStoredLotMeta(rawMeta, defaults);
+    const storedFloor = parseStoredFloorRecord(
+      rawFloors[String(meta.activeFloor)],
+      meta.activeFloor,
+      `${meta.seed}:floor:${meta.activeFloor}`,
+    );
+
+    const occupiedSet = new Set<number>();
+    let occupiedEntryCount = 0;
+    if (storedFloor !== null) {
+      for (const obs of storedFloor.obstacles) {
+        occupiedSet.add(obs.cell);
+        occupiedEntryCount += 1;
+      }
+      for (const vehicle of storedFloor.vehicles) {
+        for (const cell of vehicle.cells) {
+          occupiedSet.add(cell);
+          occupiedEntryCount += 1;
+        }
+      }
+    }
+
+    const recomputed = computeStandardStallCapacity(meta.gridCols, meta.gridRows, occupiedSet);
+    const matchInvariantOk =
+      storedFloor !== null &&
+      occupiedEntryCount === occupiedSet.size &&
+      recomputed.remainingStalls === storedFloor.remainingStalls;
+
     console.info(
       JSON.stringify({
-        event: 'ops.health_check',
-        ok: true,
-        pingCount,
-        subredditName: context.subredditName ?? null,
-        postId: context.postId ?? null,
-        userId: context.userId ?? null,
+        event: 'ops.health_receipt',
+        ok: matchInvariantOk && postDataUnder2048,
+        matchInvariantOk,
+        postDataBytes,
+        postDataUnder2048,
+        cronStatus,
+        postId,
+        activeFloor: meta.activeFloor,
+        revision: meta.revision,
+        remainingStalls: recomputed.remainingStalls,
       }),
     );
     return c.json<UiResponse>(
       {
-        showToast: `Last Spot healthy in r/${subredditLabel}`,
+        showToast: matchInvariantOk
+          ? `Last Spot healthy (${postId} B${meta.activeFloor}: ${recomputed.remainingStalls} stalls)`
+          : `Last Spot invariant drift detected on ${postId}`,
       },
       200,
     );
@@ -818,10 +1337,18 @@ export function createApp(deps: AppDependencies = {}): Hono {
 
   router.post(TRIGGER_ENDPOINTS.onPostDelete, async (c) => {
     const payload = await readJsonRecord(c);
+    const nestedDelete =
+      payload.postDelete !== null &&
+      typeof payload.postDelete === 'object' &&
+      !Array.isArray(payload.postDelete)
+        ? (payload.postDelete as Record<string, unknown>)
+        : undefined;
     const deletedPostId =
-      typeof payload.postId === 'string'
+      typeof payload.postId === 'string' && payload.postId.length > 0
         ? payload.postId
-        : (context.postId ?? undefined);
+        : typeof nestedDelete?.postId === 'string' && nestedDelete.postId.length > 0
+          ? nestedDelete.postId
+          : (context.postId ?? undefined);
 
     if (typeof deletedPostId === 'string' && deletedPostId.length > 0) {
       await redisClient.del(...buildPostScopedLotKeys(deletedPostId));
@@ -847,20 +1374,143 @@ export function createApp(deps: AppDependencies = {}): Hono {
 
   router.post(SCHEDULER_TASKS.dailyPost.endpoint, async (c) => {
     await readJsonRecord(c);
-    console.info(
-      JSON.stringify({
-        event: 'scheduler.daily_post_tick',
-        task: SCHEDULER_TASKS.dailyPost.name,
-        subredditName: context.subredditName ?? null,
-      }),
-    );
-    return c.json(
-      {
-        status: 'ok',
-        task: SCHEDULER_TASKS.dailyPost.name,
-      },
-      200,
-    );
+    const currentNow = nowMs();
+    const runAtIso = new Date(currentNow).toISOString();
+    const puzzleDate = runAtIso.slice(0, 10);
+    const subredditName = context.subredditName ?? 'lastspot';
+
+    const priorStatus = await redisClient.hGetAll(CRON_STATUS_KEY);
+    if (
+      priorStatus.lastCreatedPuzzleDate === puzzleDate &&
+      typeof priorStatus.lastPostId === 'string' &&
+      priorStatus.lastPostId.length > 0
+    ) {
+      await redisClient.hSet(CRON_STATUS_KEY, {
+        lastRunAtIso: runAtIso,
+        lastStatus: 'skipped_already_created',
+        lastPuzzleDate: puzzleDate,
+      });
+      console.info(
+        JSON.stringify({
+          event: 'scheduler.daily_post_tick',
+          task: SCHEDULER_TASKS.dailyPost.name,
+          outcome: 'skipped_already_created',
+          puzzleDate,
+          postId: priorStatus.lastPostId,
+          subredditName: context.subredditName ?? null,
+        }),
+      );
+      return c.json(
+        {
+          status: 'ok',
+          task: SCHEDULER_TASKS.dailyPost.name,
+          outcome: 'skipped_already_created',
+          postId: priorStatus.lastPostId,
+          puzzleDate,
+        },
+        200,
+      );
+    }
+
+    const cronLockKey = buildCronLockKey(puzzleDate);
+    const lockReply = await redisClient.set(cronLockKey, '1', {
+      nx: true,
+      expiration: new Date(Math.max(Date.now(), currentNow) + 120_000),
+    });
+
+    if (lockReply !== 'OK') {
+      await redisClient.hSet(CRON_STATUS_KEY, {
+        lastRunAtIso: runAtIso,
+        lastStatus: 'skipped_locked',
+        lastPuzzleDate: puzzleDate,
+      });
+      console.info(
+        JSON.stringify({
+          event: 'scheduler.daily_post_tick',
+          task: SCHEDULER_TASKS.dailyPost.name,
+          outcome: 'skipped_locked',
+          puzzleDate,
+          subredditName: context.subredditName ?? null,
+        }),
+      );
+      return c.json(
+        {
+          status: 'ok',
+          task: SCHEDULER_TASKS.dailyPost.name,
+          outcome: 'skipped_locked',
+          puzzleDate,
+        },
+        200,
+      );
+    }
+
+    try {
+      const created = await createAndMaterializeSeededPost({
+        redisClient,
+        redditClient,
+        subredditName,
+        puzzleDate,
+        seed: `d:${puzzleDate}`,
+      });
+      await redisClient.hSet(CRON_STATUS_KEY, {
+        lastRunAtIso: runAtIso,
+        lastStatus: 'created',
+        lastPostId: created.postId,
+        lastPuzzleDate: puzzleDate,
+        lastCreatedPuzzleDate: puzzleDate,
+        lastError: '',
+      });
+      console.info(
+        JSON.stringify({
+          event: 'scheduler.daily_post_tick',
+          task: SCHEDULER_TASKS.dailyPost.name,
+          outcome: 'created',
+          puzzleDate,
+          postId: created.postId,
+          summaryCommentId: created.summaryCommentId,
+          postDataBytes: created.postDataBytes,
+          subredditName: context.subredditName ?? null,
+        }),
+      );
+      return c.json(
+        {
+          status: 'ok',
+          task: SCHEDULER_TASKS.dailyPost.name,
+          outcome: 'created',
+          postId: created.postId,
+          summaryCommentId: created.summaryCommentId,
+          puzzleDate,
+        },
+        200,
+      );
+    } catch (error) {
+      await redisClient.del(cronLockKey);
+      const message = error instanceof Error ? error.message : String(error);
+      await redisClient.hSet(CRON_STATUS_KEY, {
+        lastRunAtIso: runAtIso,
+        lastStatus: 'failed',
+        lastPuzzleDate: puzzleDate,
+        lastError: message,
+      });
+      console.error(
+        JSON.stringify({
+          event: 'scheduler.daily_post_failed',
+          task: SCHEDULER_TASKS.dailyPost.name,
+          puzzleDate,
+          error: message,
+        }),
+      );
+      return c.json(
+        {
+          status: 'error',
+          task: SCHEDULER_TASKS.dailyPost.name,
+          outcome: 'failed',
+          puzzleDate,
+          error: message,
+        },
+        500,
+      );
+    }
   });
 
   return router;

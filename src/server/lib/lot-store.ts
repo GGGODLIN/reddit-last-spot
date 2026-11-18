@@ -22,7 +22,11 @@ import {
   type StoredLotMeta,
   type UserStreakStats,
   type ViewerMode,
+  WINDOW_NOTE_LABELS,
+  type WindowNoteId,
 } from '../../shared/domain';
+
+export const CRON_STATUS_KEY = 's1:ops:cron_status' as const;
 
 export interface PostSeedDefaults {
   readonly puzzleDate: string;
@@ -38,6 +42,28 @@ export function buildPostScopedLotKeys(postId: string): [string, string, string,
     `s1:post:${postId}:placements`,
     `s1:post:${postId}:lb`,
   ];
+}
+
+export function buildCronLockKey(puzzleDate: string): string {
+  return `s1:ops:cron_lock:${puzzleDate}`;
+}
+
+export function formatSpoilerSafeBattleReport(
+  receipt: PlacementReceipt,
+  windowNoteId: WindowNoteId | null,
+): string {
+  const vehicleLabel = receipt.vehicleType === 'van_3x1' ? '3x1 Van' : '2x1 Sedan';
+  const lines = [
+    `**Last Spot Shift Report (${receipt.puzzleDate})** — Driver: u/${receipt.username}`,
+    `Floor B${receipt.floorNumber} | Vehicle: ${vehicleLabel} | Wasted Stalls: ${receipt.wastedStalls} | Elevator Bonus: +${receipt.elevatorBonus} | Shift Score: ${receipt.totalShiftScore}`,
+  ];
+  if (receipt.crownedLastSpotHero) {
+    lines.push('Badge: **Last Spot Hero** (sealed the final open stall on the floor)');
+  }
+  if (windowNoteId !== null) {
+    lines.push(`Window Note: "${WINDOW_NOTE_LABELS[windowNoteId]}"`);
+  }
+  return lines.join('\n');
 }
 
 export function buildUserStatsKey(userId: string): string {
