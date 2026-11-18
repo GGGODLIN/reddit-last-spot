@@ -901,4 +901,39 @@ describe('Ticket 03 — Battle Reports, Journeys Anti-Corruption Adapter, and Mo
       infoSpy.mockRestore();
     },
   );
+
+  devvitTest(
+    'onAppInstall seeds the initial daily post once and records cron_status so same-day scheduler ticks do not duplicate',
+    async ({ headers }) => {
+      const fakeReddit = createFakeRedditAdapter();
+      const testApp = createApp({
+        redditClient: fakeReddit.adapter,
+        nowMs: () => Date.parse('2026-11-19T01:00:00.000Z'),
+      });
+      const installCtx = buildTestContext(headers, { postId: null, userId: null });
+
+      const installRes = await devvitRunWithContext(installCtx, async () => {
+        return await testApp.request(TRIGGER_ENDPOINTS.onAppInstall, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ type: 'AppInstall' }),
+        });
+      });
+      expect(installRes.status).toBe(200);
+      expect(fakeReddit.submittedPosts).toHaveLength(1);
+      expect(fakeReddit.submittedComments).toHaveLength(1);
+
+      const cronRes = await devvitRunWithContext(installCtx, async () => {
+        return await testApp.request(SCHEDULER_TASKS.dailyPost.endpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: '{}',
+        });
+      });
+      expect(cronRes.status).toBe(200);
+      const cronBody = (await cronRes.json()) as { outcome?: string };
+      expect(cronBody.outcome).toBe('skipped_already_created');
+      expect(fakeReddit.submittedPosts).toHaveLength(1);
+    },
+  );
 });
