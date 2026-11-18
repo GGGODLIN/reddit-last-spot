@@ -80,6 +80,21 @@ export function createConflictAwareRedisWrapper(baseRedis: RedisClient) {
   const keyVersions = new Map<string, number>();
   const writtenKeys: string[] = [];
   let nextExecFault: InjectedExecFault = 'none';
+  let activeExecBarrier: Promise<void> = Promise.resolve();
+
+  const withAtomicExecLock = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const previous = activeExecBarrier;
+    let release!: () => void;
+    activeExecBarrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  };
 
   const telemetry: RedisWrapperTelemetry = {
     watchCalls: 0,
@@ -183,22 +198,25 @@ export function createConflictAwareRedisWrapper(baseRedis: RedisClient) {
               return [0];
             }
 
-            // RedisMock.Exec skips watched-key dirty checks; enforce real Redis WATCH semantics here.
-            for (const [key, snapshotVersion] of watchedSnapshots.entries()) {
-              const currentVersion = keyVersions.get(key) ?? 0;
-              if (currentVersion !== snapshotVersion) {
-                await target.discard();
-                watchedSnapshots.clear();
-                queuedWriteKeys.length = 0;
-                return [];
+            // RedisMock.Exec yields across setImmediate per queued command and skips watched-key dirty checks;
+            // serialize EXEC atomically so concurrent transactions observe real single-threaded Redis WATCH/EXEC semantics.
+            return await withAtomicExecLock(async () => {
+              for (const [key, snapshotVersion] of watchedSnapshots.entries()) {
+                const currentVersion = keyVersions.get(key) ?? 0;
+                if (currentVersion !== snapshotVersion) {
+                  await target.discard();
+                  watchedSnapshots.clear();
+                  queuedWriteKeys.length = 0;
+                  return [];
+                }
               }
-            }
 
-            const replies = await target.exec();
-            bumpKeys(queuedWriteKeys);
-            watchedSnapshots.clear();
-            queuedWriteKeys.length = 0;
-            return replies;
+              const replies = await target.exec();
+              bumpKeys(queuedWriteKeys);
+              watchedSnapshots.clear();
+              queuedWriteKeys.length = 0;
+              return replies;
+            });
           };
         }
 
@@ -230,6 +248,7 @@ export function createConflictAwareRedisWrapper(baseRedis: RedisClient) {
 
       if (prop === 'watch') {
         return async (...keys: string[]) => {
+          await activeExecBarrier;
           telemetry.watchCalls += 1;
           const innerTxn = await target.watch(...keys);
           return wrapTxClient(innerTxn, keys);
@@ -242,6 +261,7 @@ export function createConflictAwareRedisWrapper(baseRedis: RedisClient) {
       }
 
       return async (...args: unknown[]) => {
+        await activeExecBarrier;
         if (TOP_LEVEL_READ_METHODS.has(prop)) {
           telemetry.topLevelReadCalls += 1;
         }

@@ -49,10 +49,18 @@ export const SCHEDULER_TASKS = {
 export const API_ENDPOINTS = {
   health: '/api/health',
   probeWriteGuard: '/api/probe-write-guard',
+  lotSummary: '/api/lot-summary',
+  lotState: '/api/lot-state',
+  park: '/api/park',
 } as const;
 
 export const ERROR_CODES = {
   loginRequiredForOfficialSpot: 'LOGIN_REQUIRED_FOR_OFFICIAL_SPOT',
+  invalidParkPayload: 'INVALID_PARK_PAYLOAD',
+  invalidFloorQuery: 'INVALID_FLOOR_QUERY',
+  spotTaken: 'SPOT_TAKEN',
+  lotUpdatedRetryPreview: 'LOT_UPDATED_RETRY_PREVIEW',
+  concurrentConflictRetryExhausted: 'CONCURRENT_CONFLICT_RETRY_EXHAUSTED',
 } as const;
 
 export const ALL_INTERNAL_ENDPOINTS = [
