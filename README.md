@@ -6,7 +6,7 @@ Every daily post opens a shared underground garage floor pre-seeded to 50–70% 
 
 ### Live Hackathon Links
 
-- **Live Playable Demo Post**: [Last Spot — Daily Valet Shift (`r/last_spot_valet_dev2`)](https://www.reddit.com/r/last_spot_valet_dev2/comments/1xzr9mp/last_spot_daily_valet_shift_20261118/)
+- **Live Playable Demo Post**: [Last Spot — Daily Valet Shift (`r/last_spot_valet_dev2`)](https://www.reddit.com/r/last_spot_valet_dev2/comments/1xzuxpw/last_spot_daily_valet_shift_20261119/)
 - **Playtest Subreddit (`< 200` members, `dr-admin-approve` installed)**: [r/last_spot_valet_dev2](https://www.reddit.com/r/last_spot_valet_dev2/)
 - **Devvit App Directory Listing (Unpublished Playtest Build)**: [developers.reddit.com/apps/last-spot-valet](https://developers.reddit.com/apps/last-spot-valet)
 
