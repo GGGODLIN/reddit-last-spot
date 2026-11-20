@@ -5,6 +5,7 @@
 - **Project Name**: `Last Spot`
 - **Tagline (<= 60 chars)**: `Daily shared valet puzzle: park tight, leave stalls alive.`
 - **Built With**: `devvit-web`, `typescript`, `react`, `tailwindcss`, `hono`, `redis`, `vite`, `vitest`, `fast-check`
+- **Demo Video (48s, `< 1 min` compliant)**: `https://youtu.be/I_gax2vLqpI`
 - **App Listing (Unpublished Playtest Build)**: `https://developers.reddit.com/apps/last-spot-valet`
 - **Test Subreddit (`< 200` members, private with `Devvit Admin Helper App` / `dr-admin-approve` installed)**: `https://www.reddit.com/r/last_spot_valet_dev2/`
 - **Live Playable Demo Post**: `https://www.reddit.com/r/last_spot_valet_dev2/comments/1xzuxpw/last_spot_daily_valet_shift_20261119/`

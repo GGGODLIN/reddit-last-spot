@@ -6,6 +6,7 @@ Every daily post opens a shared underground garage floor pre-seeded to 50–70% 
 
 ### Live Hackathon Links
 
+- **48-Second Demo Video**: [Last Spot — Daily Shared Valet Parking Puzzle (YouTube)](https://youtu.be/I_gax2vLqpI)
 - **Live Playable Demo Post**: [Last Spot — Daily Valet Shift (`r/last_spot_valet_dev2`)](https://www.reddit.com/r/last_spot_valet_dev2/comments/1xzuxpw/last_spot_daily_valet_shift_20261119/)
 - **Playtest Subreddit (`< 200` members, private with `Devvit Admin Helper App` / `dr-admin-approve` installed)**: [r/last_spot_valet_dev2](https://www.reddit.com/r/last_spot_valet_dev2/)
 - **Devvit App Directory Listing (Unpublished Playtest Build)**: [developers.reddit.com/apps/last-spot-valet](https://developers.reddit.com/apps/last-spot-valet)
@@ -66,9 +67,9 @@ The automated Vitest + `fast-check` suite exercises both public seams:
 - **Seam 1 (`src/server/__tests__/`)**: Manifest-to-Hono route bijection, transaction conflict injection, Conditional Property-Based Testing (`P1..P5`) against an independent recursive backtracking domino-packing oracle, stickied Battle Report deduplication/fallback, Express-free server bundle verification, and isolated single-post resets.
 - **Seam 2 (`src/client/__tests__/`)**: Zero-fetch inline `Splash` mount & `touch-action: pan-y`, 3-step shift progression, two-step preview/rotate/confirm lock, Dead Spot cone rendering, `B1/B2` floor tab switching, `VISITOR_HOLD` `localStorage` promotion/recovery, and Battle Report preview confirmation.
 
-### Upload & Install to a `< 200`-Member Public Test Subreddit
+### Upload & Install to a `< 200`-Member Test Subreddit
 
-> **Hackathon Compliance Note**: Never run `devvit publish` prior to the end of hackathon judging. Deploy exclusively via `devvit upload` and `devvit install` on a `< 200`-member public test subreddit.
+> **Hackathon Compliance Note**: Never run `devvit publish` prior to the end of hackathon judging. Deploy exclusively via `devvit upload` and `devvit install` on a `< 200`-member test subreddit (public, or private with `dr-admin-approve` installed).
 
 ```bash
 npx devvit upload
