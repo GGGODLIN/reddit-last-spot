@@ -6,7 +6,7 @@
 - **Tagline (<= 60 chars)**: `Daily shared valet puzzle: park tight, leave stalls alive.`
 - **Built With**: `devvit-web`, `typescript`, `react`, `tailwindcss`, `hono`, `redis`, `vite`, `vitest`, `fast-check`
 - **App Listing (Unpublished Playtest Build)**: `https://developers.reddit.com/apps/last-spot-valet`
-- **Test Subreddit (`< 200` members, `dr-admin-approve` installed)**: `https://www.reddit.com/r/last_spot_valet_dev2/`
+- **Test Subreddit (`< 200` members, private with `Devvit Admin Helper App` / `dr-admin-approve` installed)**: `https://www.reddit.com/r/last_spot_valet_dev2/`
 - **Live Playable Demo Post**: `https://www.reddit.com/r/last_spot_valet_dev2/comments/1xzuxpw/last_spot_daily_valet_shift_20261119/`
 - **Public Repository**: `https://github.com/GGGODLIN/reddit-last-spot`
 - **License**: `Apache-2.0` (`https://github.com/GGGODLIN/reddit-last-spot/blob/main/LICENSE`)
@@ -62,10 +62,20 @@ We wanted a daily game that feels **native to a subreddit**: short enough to fin
 
 ## Judge Testing Instructions
 
-1. Open the live Demo Post in our `< 200`-member public test subreddit (`dr-admin-approve` installed):
+1. Open the live Demo Post in our `< 200`-member private playtest subreddit (`Devvit Admin Helper App` / `dr-admin-approve` installed for automatic admin access):
    `https://www.reddit.com/r/last_spot_valet_dev2/comments/1xzuxpw/last_spot_daily_valet_shift_20261119/`
 2. On the inline feed card (`Splash`), observe the current floor (`B1`), live stall count, and tap **Start Valet Shift**.
 3. Complete **Warm-Up Bay 1** (`2x1` Sedan) and **Warm-Up Bay 2** (`3x1` Van) by tapping an open stall, optionally rotating `90°`, and confirming.
 4. On **Step 3 — Live Floor**, park your daily vehicle onto the shared community garage, watch the **Ghost-Stall Repack** overlay highlight surviving stalls and any Dead Spots, and inspect your Shift Score + Elevator Bonus.
 5. *(Logged-in Reddit account)* Tap **Post Battle Report** to preview and post a spoiler-free shift card under the stickied **Daily Lot Log** comment. *(Logged-out account)* Inspect the full `VISITOR_HOLD` flow and **Sign in to Lock Spot** handoff.
 6. Close the modal to see the inline feed `Splash` card immediately reflect the newly parked vehicle and updated open stall count.
+
+---
+
+## Gallery Screenshots (Live Hosted on Reddit)
+
+- ![Inline Feed Splash](https://raw.githubusercontent.com/GGGODLIN/reddit-last-spot/main/docs/screenshots/01-reddit-live-splash.jpg)
+- ![Shared Live Floor](https://raw.githubusercontent.com/GGGODLIN/reddit-last-spot/main/docs/screenshots/02-live-floor-shared.jpg)
+- ![Ghost-Stall Repack & Dead Spots](https://raw.githubusercontent.com/GGGODLIN/reddit-last-spot/main/docs/screenshots/03-ghost-stall-repack.jpg)
+- ![Shift Result & Battle Report Preview](https://raw.githubusercontent.com/GGGODLIN/reddit-last-spot/main/docs/screenshots/04-shift-result-battle-report.jpg)
+- ![Stickied Daily Lot Log & Devvit Admin Helper](https://raw.githubusercontent.com/GGGODLIN/reddit-last-spot/main/docs/screenshots/05-stickied-daily-lot-log.jpg)

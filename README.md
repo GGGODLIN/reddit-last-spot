@@ -7,8 +7,14 @@ Every daily post opens a shared underground garage floor pre-seeded to 50–70% 
 ### Live Hackathon Links
 
 - **Live Playable Demo Post**: [Last Spot — Daily Valet Shift (`r/last_spot_valet_dev2`)](https://www.reddit.com/r/last_spot_valet_dev2/comments/1xzuxpw/last_spot_daily_valet_shift_20261119/)
-- **Playtest Subreddit (`< 200` members, `dr-admin-approve` installed)**: [r/last_spot_valet_dev2](https://www.reddit.com/r/last_spot_valet_dev2/)
+- **Playtest Subreddit (`< 200` members, private with `Devvit Admin Helper App` / `dr-admin-approve` installed)**: [r/last_spot_valet_dev2](https://www.reddit.com/r/last_spot_valet_dev2/)
 - **Devvit App Directory Listing (Unpublished Playtest Build)**: [developers.reddit.com/apps/last-spot-valet](https://developers.reddit.com/apps/last-spot-valet)
+
+### Live Reddit Screenshots
+
+| Inline Feed Splash | Shared Live Floor (`3x1` Van Preview) | Ghost-Stall Repack & Dead Spots |
+|---|---|---|
+| ![Inline Feed Splash](https://raw.githubusercontent.com/GGGODLIN/reddit-last-spot/main/docs/screenshots/01-reddit-live-splash.jpg) | ![Shared Live Floor](https://raw.githubusercontent.com/GGGODLIN/reddit-last-spot/main/docs/screenshots/02-live-floor-shared.jpg) | ![Ghost-Stall Repack](https://raw.githubusercontent.com/GGGODLIN/reddit-last-spot/main/docs/screenshots/03-ghost-stall-repack.jpg) |
 
 ---
 
