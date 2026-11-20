@@ -10,6 +10,7 @@ Every daily post opens a shared underground garage floor pre-seeded to 50–70% 
 - **Live Playable Demo Post**: [Last Spot — Daily Valet Shift (`r/last_spot_valet_dev2`)](https://www.reddit.com/r/last_spot_valet_dev2/comments/1xzuxpw/last_spot_daily_valet_shift_20261119/)
 - **Playtest Subreddit (`< 200` members, private with `Devvit Admin Helper App` / `dr-admin-approve` installed)**: [r/last_spot_valet_dev2](https://www.reddit.com/r/last_spot_valet_dev2/)
 - **Devvit App Directory Listing (Unpublished Playtest Build)**: [developers.reddit.com/apps/last-spot-valet](https://developers.reddit.com/apps/last-spot-valet)
+- **Public Repository**: [github.com/GGGODLIN/reddit-last-spot](https://github.com/GGGODLIN/reddit-last-spot)
 
 ### Live Reddit Screenshots
 
@@ -31,7 +32,7 @@ Every daily post opens a shared underground garage floor pre-seeded to 50–70% 
    - **Exact Standard Stall Capacity (`ν(G)`) & Visual Proof**: An `Int32Array` augmenting-path bipartite solver computes exact remaining `2x1` domino capacity `ν(G)` in `< 0.1 ms`. Immediately after locking a spot, a `0.8s` **Ghost-Stall Repack** overlay draws dashed `2x1` frames over surviving stalls and places orange hazard cones on any newly isolated **Dead Spots**—explaining the score visually without requiring graph theory.
    - **Elevator Bonus**: Placements with `0` Wasted Stalls earn a Manhattan-distance bonus (`+2` per step saved toward the `ELEV` bay).
    - **Last Spot Hero & Overflow Floors (`B1 [Full] / B2 [Live]`)**: Claiming the final available stall (`ν(G') === 0`) crowns the player **Last Spot Hero** on `B1`, seals `B1` as an inspectable Archived Floor, and atomically opens `B2` (`<= 50` floors) in the same Redis transaction so latecomers and judges always have a playable Live Floor.
-   - **Logged-Out `VISITOR_HOLD` Handoff**: Logged-out visitors and incognito judges play all three steps against the real Live Floor snapshot, view a full `VISITOR_HOLD` result drawer, and can tap **Sign in to Lock Spot** to persist `{ postId, floorNumber, cells }` in `localStorage` before `showLoginPrompt()` and promote their spot upon reload.
+   - **Logged-Out `VISITOR_HOLD` Handoff**: When deployed in a public subreddit (and verified in automated client Seam 2 tests), logged-out visitors can play all three steps against the real Live Floor snapshot, view a full `VISITOR_HOLD` result drawer, and tap **Sign in to Lock Spot** to persist `{ postId, floorNumber, cells }` in `localStorage` before `showLoginPrompt()` and promote their spot upon reload.
    - **Spoiler-Safe Stickied Battle Reports**: Players preview a coordinate-free Battle Report with optional preset window notes and reply under the post's single stickied `Daily Lot Log` comment (`hSetNX`-deduplicated, with automatic lock release and clipboard/share-sheet fallback on rate limits).
 
 ---
